@@ -1,0 +1,58 @@
+# Ignore Python cache and compiled files
+__pycache__/
+*.py[cod]
+*.pyo
+*.so
+
+# Ignore Jupyter notebooks checkpoints
+.ipynb_checkpoints/
+
+# Ignore R temporary files
+.Rhistory
+.RData
+.Rproj.user/
+
+# Ignore macOS Finder files
+.DS_Store
+
+# Ignore VSCode and Spyder settings
+.vscode/
+.spyderproject
+.spyproject
+
+# Ignore FASTA/FASTQ outputs
+*.fasta
+*.fa
+*.fastq
+*.fq
+*.fna
+*.gb
+*.gbk
+*.faa
+*.gff
+*.gff3
+*.sam
+*.bam
+*.bed
+*.vcf
+
+# Ignore temporary and intermediate files
+*.log
+*.tmp
+*.bak
+*.out
+*.err
+*.swp
+
+# Ignore large outputs
+*.tsv
+*.csv
+*.xlsx
+*.pdf
+*.svg
+
+# Ignore custom folders you don't want tracked
+results/
+output/
+data/
+scratch/
