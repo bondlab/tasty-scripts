@@ -31,3 +31,7 @@ It can run in single mode (use -gff and -gbk for feature and genome file), or ba
 
 In batch mode, it will match feature files to genome files if acession number is filename prefix, 
 like GCF_000816575.1_regionoutput.gff3. Use -proteinid to use protein_id instead of locus_tag to match CDS features to annotations
+
+----
+
+Other scripts are specific for moving files around in post-processing, likely are not useful
