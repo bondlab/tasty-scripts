@@ -9,6 +9,8 @@ from Bio.Seq import Seq
 from Bio.SeqUtils import molecular_weight
 from Bio.SeqRecord import SeqRecord
 from Bio.SeqFeature import SeqFeature, FeatureLocation, CompoundLocation
+import warnings
+from Bio import BiopythonWarning
 
 #
 # hemehunter - read gbk files, verify they have translated regions, and scan for CXXCH motifs
@@ -19,7 +21,9 @@ from Bio.SeqFeature import SeqFeature, FeatureLocation, CompoundLocation
 #
 #   by ChattyGPT 4o and Daniel Bond
 #   
-#   updated 5/16/2024
+#   updated 5/26/2024
+
+#
 #
 #
 # Simulate command-line arguments when running in an environment like Spyder.
@@ -27,35 +31,47 @@ from Bio.SeqFeature import SeqFeature, FeatureLocation, CompoundLocation
 
 sys.argv = [
     "hemehunter.py",
-#    "-f",
-    "GSU_DSMZ_3_23_translations.gbk",
+    "//Users/daniel/Desktop/ReturnoftheChrome/GeobacteraceaeRefSeq/Geo_gbffs",
+    "-f",
+    "-m 2",
+    "--force"  
 ]
 
-# #
-#
+# # #
+# 
+
 ####################################################################
+
+# Parse files and prepare translation if needed
 
 def parse_arguments():
     parser = argparse.ArgumentParser(
     description=(
-        "Identify multiheme c-type cytochromes (≥3 CXXCH motifs, including noncannonical) from a GenBank file.\n\n"
-        "This script scans translated CDS features and selects those with at least 3 canonical CXXCH motifs.\n"
+        "****************************************************************************************\n"
+        "HemeHunter 3000 identifies multiheme c-type cytochromes in a GenBank file or directory of files.\n\n"
+        "This script scans translated CDS features and selects those with (default) at least 3,\n"
+        "or the threshold set with -m, to find that many CXXCH motifs before looking for others.\n"
+        "The noncannonical list is CXCH, CXXXCH, and C (10,14) CH, and avoids overcounting errors.\n"
         "It calculates motif counts, molecular weight, and motif density, and outputs a summary TSV.\n"
         "Use the -f flag to also save a FASTA file of the cytochrome amino acid sequences.\n\n"
-        "It will automatically translate any untranslated regions, including truncated genes. If you don't\n"
-        "want to annotate any new regions, just ignore the new file created ending in _translated."
+        "If you need translations, or want to look for missing genes, use the option -t \n"
+        "which will automatically translate any untranslated regions, including truncated genes.\n"
+        "It will then use the new _translated.gbk version of the file to call cytochromes\n"
+        "\nIt will autodetect if you provide a directory or single file, and process appropriately\n"
+        "****************************************************************************************\n"
     ),
     formatter_class=argparse.RawTextHelpFormatter
-)
-    parser.add_argument("genbank_file", help="Input GenBank file (.gbk or .gbff)")
-    parser.add_argument(
-        "-o", "--output", help="Output TSV file (default: <input>_cytochromes.tsv)"
     )
+    parser.add_argument("genbank_file", help="Input GenBank file (.gbk or .gbff) or a folder for batch mode")
+    parser.add_argument("-o", "--output", help="Output TSV file (default: <input>_cytochromes.tsv)")
+    parser.add_argument("-f", "--fasta", action="store_true", help="Optional, output a FASTA file of the cytochrome protein sequences.")
+    parser.add_argument("-m", "--min_motifs", type=int, default=3, help="Minimum number of CXXCH motifs to consider a protein a multiheme cytochrome (default: 3)")
+    parser.add_argument("-t", "--translations", action="store_true", help="If set, translate CDS features missing /translation qualifiers and write a new _translations.gbk file.")
     parser.add_argument(
-        "-f", "--fasta", action="store_true", help="Also output a FASTA file of the cytochrome protein sequences."
+    "--force", action="store_true",
+    help="If set, allows overwriting existing output files (_translations.gbk, .tsv, .fasta)."
     )
     return parser.parse_args()
-
 
 def has_translation(feature):
     """Returns True if feature has a valid /translation qualifier."""
@@ -69,7 +85,7 @@ def has_translation(feature):
         and val.strip() != ""
     )
 
-def ensure_translations(genbank_file):
+def ensure_translations(genbank_file, overwrite=False):
     """
     Ensures all CDS features in the GenBank file have /translation qualifiers.
     If any are missing, translate and save new GenBank file with _translations.gbk suffix.
@@ -78,40 +94,46 @@ def ensure_translations(genbank_file):
     updated_records = []
     needs_update = False
 
+    print(f"[DEBUG] overwrite = {overwrite}")
+
     for record in SeqIO.parse(genbank_file, "genbank"):
         new_features = []
         for feature in record.features:
             if feature.type == "CDS":
                 locus = feature.qualifiers.get("locus_tag", ["?"])[0]
-                # print(f"\n[CHECK] locus_tag: {locus}")
-
                 if has_translation(feature):
                     pass
-                    #print(f"[OK] Translation already present for {locus}")
                 else:
-                    # print(f"[ADD] No valid translation found for {locus}, translating...")
                     try:
                         dna_seq = feature.extract(record.seq)
                         transl_table = int(feature.qualifiers.get("transl_table", [11])[0])
+                        trimmed_len = len(dna_seq) - (len(dna_seq) % 3)
+                        dna_seq = dna_seq[:trimmed_len]
                         aa_seq = dna_seq.translate(table=transl_table, to_stop=True)
                         feature.qualifiers["translation"] = [str(aa_seq)]
-                        needs_update = True  # ✅ Set only when we actually add one
-                        # print(f"[SUCCESS] Translation added for {locus}")
+                        needs_update = True
                     except Exception as e:
                         print(f"[ERROR] Could not translate CDS at {locus}: {e}")
-
+            # ✅ Always add the feature (whether gene or CDS or other)
             new_features.append(feature)
-
+    
         record.features = new_features
         updated_records.append(record)
 
     if needs_update:
         base = os.path.splitext(os.path.basename(genbank_file))[0]
-        updated_file = base + "_translations.gbk"
+        input_dir = os.path.dirname(os.path.abspath(genbank_file))
+        updated_file = os.path.join(input_dir, base + "_translations.gbk")
+        
+        if os.path.exists(updated_file) and not overwrite:
+            print(f"[WARNING] {updated_file} already exists. Use --force to overwrite. Skipping translation step.")
+            return genbank_file
+    
         with open(updated_file, "w") as out_handle:
             SeqIO.write(updated_records, out_handle, "genbank")
         print(f"\n[INFO] CDS without translations found. New GenBank used in analysis written to: {updated_file}")
         return updated_file
+
     else:
         print("\n[INFO] All CDS features already have valid translations. No new file written.")
         return genbank_file
@@ -121,20 +143,23 @@ def check_genbank_file(genbank_file):
     cds_found = False
     valid_translations = 0
 
-    for record in SeqIO.parse(genbank_file, "genbank"):
-        for feature in record.features:
-            if feature.type == "CDS":
-                cds_found = True
-                if has_translation(feature):
-                    valid_translations += 1
-                else:
-                    try:
-                        dna_seq = feature.extract(record.seq)
-                        aa_seq = dna_seq.translate(table=1, to_stop=True)
-                        if aa_seq:
-                            valid_translations += 1
-                    except Exception:
-                        pass
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", BiopythonWarning)
+
+        for record in SeqIO.parse(genbank_file, "genbank"):
+            for feature in record.features:
+                if feature.type == "CDS":
+                    cds_found = True
+                    if has_translation(feature):
+                        valid_translations += 1
+                    else:
+                        try:
+                            dna_seq = feature.extract(record.seq)
+                            aa_seq = dna_seq.translate(table=1, to_stop=True)
+                            if aa_seq:
+                                valid_translations += 1
+                        except Exception:
+                            pass
 
     if not cds_found:
         raise ValueError("No CDS features found in GenBank file.")
@@ -146,81 +171,111 @@ def check_genbank_file(genbank_file):
 
 ####################################################################
 
-def find_cxxch_motifs(protein_seq):
-    """Return a dict with all CXXCH-like motif counts."""
-    motifs = {
-        "CXXCH": re.findall(r"C..CH", protein_seq),
-        "CXXXCH": re.findall(r"C...CH", protein_seq),
-        "CXCH": re.findall(r"C.CH", protein_seq),
-        "CX14CH": re.findall(r"C.{10,14}CH", protein_seq)
-    }
-    return motifs
+# Collect features. Can add other noncannonical motifs if desired
 
-def extract_cytochrome_features(genbank_file):
+def extract_cytochrome_features(genbank_file, min_motifs=3):
     """
-    Extracts CDS features with ≥3 CXXCH motifs and returns a list of dicts.
-    Includes mapped start/end of first/last motif.
+    Extracts CDS features with ≥min_motifs CXXCH motifs or total motifs (non-overlapping).
+    Tracks motif types and genomic location boundaries.
+    
+    Once a CH is counted as part of one motif, it will not be allowed to be part of another, to
+    avoid accidential overcounting errors when motifs are close together, as in C 10-14 CH,
+    or have extra C's, as in CCXCH, etc, which could be be double-counted as CXXCH and CXCH'
     """
+
     cytochromes = []
 
-    motif_patterns = {
-        "CXXCH": r"C..CH",
-        "CXXXCH": r"C...CH",
-        "CXCH": r"C.CH",
-        "CX14CH": r"C.{10,14}CH"
+    noncanonical_patterns = {
+        "CXXXCH": re.compile(r'(C[^CH]{3})(CH)'),
+        "CXCH": re.compile(r'(C[^CH]{1})(CH)'),
+        "CX14CH": re.compile(r'(C.{10,14}?)(CH)')  # use non-greedy match
     }
+    
+    def greedy_find_cxxch(seq):
+        """Greedy left-to-right non-overlapping CXXCH finder."""
+        pattern = re.compile(r"C..CH")
+        used_ch = set()
+        matches = []
+        pos = 0
+
+        while pos <= len(seq) - 5:
+            m = pattern.search(seq, pos)
+            if not m:
+                break
+            ch_pos = (m.start() + 3, m.start() + 4)
+            if ch_pos not in used_ch:
+                matches.append((m.start(), m.end()))
+                used_ch.add(ch_pos)
+                pos = m.end()
+            else:
+                pos = m.start() + 1
+
+        return matches, used_ch
 
     for record in SeqIO.parse(genbank_file, "genbank"):
         for feature in record.features:
-            if feature.type != "CDS" or not has_translation(feature):
+            if feature.type != "CDS" or "translation" not in feature.qualifiers:
                 continue
 
             aa_seq = feature.qualifiers["translation"][0]
-
-            motif_locs = {name: [m.start() for m in re.finditer(pattern, aa_seq)]
-                          for name, pattern in motif_patterns.items()}
-
-            if len(motif_locs["CXXCH"]) < 3:
-                continue  # Skip if fewer than 3 canonical motifs
-
             motif_positions = []
-            for positions in motif_locs.values():
-                motif_positions.extend(positions)
+            # odd_motif_count = 0  # old way of counting motifs
 
-            if not motif_positions:
-                continue
 
+            # === Stage 1: Greedy canonical CXXCH search === 
+            canon_matches, used_ch = greedy_find_cxxch(aa_seq)
+            motif_positions = [start for start, _ in canon_matches]
+            noncanon_counts = {"CXCH": 0, "CXXXCH": 0, "CX14CH": 0}
+            
+           # === Stage 2: Always scan for noncanonical matches, skipping overlapping CH ===
+            for name, pattern in noncanonical_patterns.items():
+                for m in pattern.finditer(aa_seq):
+                    h_index = m.start(2)  # Start of the "CH" match
+                    ch_pos = (h_index, h_index + 1)
+            
+                    if ch_pos not in used_ch:
+                        motif_positions.append(m.start())
+                        used_ch.add(ch_pos)
+                        noncanon_counts[name] += 1
+            
+            # === Threshold filter AFTER all motif types counted ===
+            if len(canon_matches) + sum(noncanon_counts.values()) < min_motifs:
+                continue  # still below threshold; skip this CDS
+                
+            # === Finalize total motif count and boundaries ===
+            total_motifs = len(canon_matches) + sum(noncanon_counts.values())
             motif_positions.sort()
             first_aa = motif_positions[0]
             last_aa = motif_positions[-1]
-
+            
             cds_start = int(feature.location.start)
             cds_end = int(feature.location.end)
             strand = feature.location.strand
-
+            
             if strand == 1:
                 motif_start_genomic = cds_start + 3 * first_aa
                 motif_end_genomic = cds_start + 3 * last_aa + 5
             else:
                 motif_start_genomic = cds_end - 3 * last_aa - 5
                 motif_end_genomic = cds_end - 3 * first_aa
-
-            motif_count = sum(len(v) for v in motif_locs.values())
-            odd_motifs = motif_count - len(motif_locs["CXXCH"])
-
+            
+            # === Compute MW and density ===
             try:
                 mw_kDa = molecular_weight(aa_seq, seq_type="protein") / 1000.0
             except Exception:
                 mw_kDa = 0.0
-
-            motif_density = motif_count / mw_kDa if mw_kDa > 0 else 0.0
-
+            
+            motif_density = total_motifs / mw_kDa if mw_kDa > 0 else 0.0
+            
+            # === Store result ===
             cytochromes.append({
                 "locus_tag": feature.qualifiers.get("locus_tag", ["?"])[0],
                 "product": feature.qualifiers.get("product", ["?"])[0],
                 "gene": feature.qualifiers.get("gene", [""])[0],
-                "motifs_total": motif_count,
-                "motifs_noncanonical": odd_motifs,
+                "motifs_total": total_motifs,
+                "motifs_CXCH": noncanon_counts["CXCH"],
+                "motifs_CXXXCH": noncanon_counts["CXXXCH"],
+                "motifs_CX10_14CH": noncanon_counts["CX14CH"],
                 "kDa": round(mw_kDa, 2),
                 "motifs_per_kDa": round(motif_density, 3),
                 "protein_id": feature.qualifiers.get("protein_id", ["?"])[0],
@@ -231,15 +286,28 @@ def extract_cytochrome_features(genbank_file):
 
     return cytochromes
 
-def write_cytochrome_tsv(features, output_path):
-    """
-    Writes tab-delimited tsv-style summary of multiheme cytochromes.
-    """
+####################################################################
+
+# Write files of collected features
+
+def write_cytochrome_tsv(features, output_path, overwrite=False):
+    if os.path.exists(output_path) and not overwrite:
+        print(f"[WARNING] {output_path} already exists. Use --force to overwrite.")
+        return
+
+    if not features:
+        print(f"[INFO] No cytochromes found. Skipping TSV write for {output_path}")
+        return
+
+    print(f"[DEBUG] Writing TSV with {len(features)} features to {output_path}")
+
     with open(output_path, "w") as f:
        header = [
-    "locus_tag", "product", "gene", "motifs_total", "motifs_noncanonical",
+    "locus_tag", "product", "gene", "motifs_total",
+    "motifs_CXCH", "motifs_CXXXCH", "motifs_CX10_14CH",
     "kDa", "motifs_per_kDa", "protein_id", "start", "end"
-       ]
+    ]
+       
        f.write("\t".join(header) + "\n")
        for feat in features:
             row = [str(feat.get(col, "")) for col in header]
@@ -259,31 +327,61 @@ def write_fasta(features, output_path):
                 f.write(seq[i:i+70] + "\n")
     print(f"[INFO] Wrote FASTA file to {output_path}")
     
+####################################################################
+
+# Main loop that processes one genbank file at a time
+
+def run_on_one_genbank_file(gbk_path, args):
+    try:
+        check_genbank_file(gbk_path)
+
+        if args.translations:
+            usable_file = ensure_translations(gbk_path, overwrite=args.force)
+        else:
+            usable_file = gbk_path
+
+        print(f"[INFO] GenBank file ready: {usable_file}")
+
+        # Now define output paths based on the final usable_file
+        input_path = os.path.abspath(usable_file)
+        input_dir = os.path.dirname(input_path)
+        base_name = os.path.splitext(os.path.basename(input_path))[0]
+
+        # Construct default output paths
+        if args.output:
+            if os.path.isdir(args.output):
+                output_file = os.path.join(args.output, f"{base_name}_cytochromes.tsv")
+            else:
+                output_file = args.output
+        else:
+            output_file = os.path.join(input_dir, f"{base_name}_cytochromes.tsv")
+
+        fasta_name = os.path.join(input_dir, f"{base_name}_cytochromes.fasta")
+
+        # Extract and write results
+        cyto_features = extract_cytochrome_features(usable_file, min_motifs=args.min_motifs)
+        write_cytochrome_tsv(cyto_features, output_file, overwrite=args.force)
+
+        if args.fasta:
+            write_fasta(cyto_features, fasta_name)
+
+    except ValueError as e:
+        print(f"[ERROR] {gbk_path}: {e}")
+
 ####################################################################    
+
+# main is primarily deciding if this is batch or single mode, and sending files to run_on_one_genbank_file
 
 if __name__ == "__main__":
     args = parse_arguments()
+    input_path = os.path.abspath(args.genbank_file)
 
-    # Determine output file name
-    if args.output:
-        output_file = args.output
+    if os.path.isdir(input_path):
+        print(f"[INFO] Batch mode: scanning {input_path} for GenBank files...")
+        for fname in os.listdir(input_path):
+            if fname.endswith((".gb", ".gbk", ".gbff")):
+                full_path = os.path.join(input_path, fname)
+                print(f"📄 Processing file: {fname}")
+                run_on_one_genbank_file(full_path, args)
     else:
-        base = os.path.splitext(os.path.basename(args.genbank_file))[0]
-        output_file = base + "_cytochromes.tsv"
-
-    try:
-        check_genbank_file(args.genbank_file)
-        usable_file = ensure_translations(args.genbank_file)
-        print(f"[INFO] GenBank file ready: {usable_file}")
-    except ValueError as e:
-        print(f"[ERROR] {e}")
-        exit(1)
-        
-    # Process GenBank and extract cytochrome features
-
-cyto_features = extract_cytochrome_features(usable_file)
-write_cytochrome_tsv(cyto_features, output_file)# Continue processing from usable_file in later modules
-
-if args.fasta:
-    fasta_name = os.path.splitext(output_file)[0] + ".fasta"
-    write_fasta(cyto_features, fasta_name)
+        run_on_one_genbank_file(input_path, args)

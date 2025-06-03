@@ -14,17 +14,17 @@ import os
 
 # There is no argparsing, just run from Spyder
 
-parent_dir = "/Users/daniel/Desktop/ReturnoftheChrome/SignalP"  # adjust as needed
+parent_dir = "/Users/daniel/Desktop/ReturnoftheChrome/SignalP_Geo"  # adjust as needed
 
 for accession in os.listdir(parent_dir):
     folder_path = os.path.join(parent_dir, accession)
     if not os.path.isdir(folder_path):
         continue
 
-    old_file = os.path.join(folder_path, "output.gff3")
+    old_file = os.path.join(folder_path, "region_output.gff3")
     if os.path.isfile(old_file):
-        new_file = os.path.join(folder_path, f"{accession}_signaloutput.gff3")
+        new_file = os.path.join(folder_path, f"{accession}_regionoutput.gff3")
         os.rename(old_file, new_file)
-        print(f"✅ Renamed output.gff3 → {accession}_signaloutput.gff3")
+        print(f"✅ Renamed region_output.gff3 → {accession}_regionoutput.gff3")
     else:
-        print(f"⚠️ No output.gff3 found in {accession}")
+        print(f"⚠️ No region_output.gff3 found in {accession}")
