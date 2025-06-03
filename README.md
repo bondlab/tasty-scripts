@@ -6,6 +6,10 @@ The HemeHunter 3000 will identify multiheme c-type cytochromes from a GenBank fi
 
 This script scans translated CDS features and selects those with (default) at least 3,
 or the threshold set with -m, to find that many 'CXXCH' motifs. before looking for non-cannonical motifs.
+
+It is careful to only use -CH dipeptides once, keeping track of motif locations, to avoid
+common errors of double-counting motifs
+
 It calculates total motif counts, molecular weight, and motif density, and outputs a summary TSV.
 Use the -f flag to also save a FASTA file of the cytochrome amino acid sequences.
 
