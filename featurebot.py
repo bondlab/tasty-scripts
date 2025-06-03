@@ -28,15 +28,15 @@ from Bio.SeqFeature import SeqFeature, FeatureLocation
 # comment out for command line operation
 
 
-sys.argv = [
-    "featurebot.py",
-    "-gbkdir", "/Users/daniel/Desktop/ReturnoftheChrome/Results to map onto Geo/Heme_Geo_analysis/gbks_to_map",
-    "-featuredir", "/Users/daniel/Desktop/ReturnoftheChrome/Results to map onto Geo/Heme_Geo_analysis/HemeResults_tomap",
-    "-multiheme",
-    "--force"
-]
+# sys.argv = [
+#     "featurebot.py",
+#     "-gbkdir", "/Users/daniel/Desktop/ReturnoftheChrome/Results to map onto Geo/Heme_Geo_analysis/gbks_to_map",
+#     "-featuredir", "/Users/daniel/Desktop/ReturnoftheChrome/Results to map onto Geo/Heme_Geo_analysis/HemeResults_tomap",
+#     "-multiheme",
+#     "--force"
+# ]
 
-# 
+# # 
 #
 ####################################################################
 
@@ -46,10 +46,12 @@ def parse_arguments():
     including analysis type and automatic output filename generation.
     """
     parser = argparse.ArgumentParser(
-        description="Update a GenBank file with output from signal peptide, beta-barrel, or multiheme analyses.\n"
-        "Can run in single mode (use -gff and -gbk for feature and genome file), or batch (specify folders).\n"
+        description="The Featurebot is a multipurpose tool to map annotations onto genomes.\n"
+        "It will update a GenBank file with output from SignalP, TMHMM beta barrel, or multiheme cytochrome analyses.\n"
+        "Can run in single mode (use -gff and -gbk for feature and genome file), or batch (specify -gbkdir and -feturedir).\n"
         "\n"
-        "In batch mode, will match features to genomes if acession number is filename prefix, like GCF_000816575.1_regionoutput.gff3."
+        "In batch mode, it will match feature files to genome files if acession number is filename prefix, like GCF_000816575.1_regionoutput.gff3.\n"
+        "Use -proteinid to use protein_id instead of locus_tag to match CDS features to annotations"
     )
     
     parser.add_argument(
