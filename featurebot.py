@@ -5,13 +5,13 @@ import os
 import re
 import sys
 import csv
-import glob
+# import glob
 from pathlib import Path
 from Bio import SeqIO
 from Bio.SeqFeature import SeqFeature, FeatureLocation
 
 #
-# Featurebot - read GFF files resulting from various prediction tools
+# Featurebot - read GFF/TSV/TXT files resulting from various prediction tools
 #   and add those features to a genbank file as misc_features with coordinates
 #
 #   by ChattyGPT 4o and Daniel Bond
@@ -22,6 +22,7 @@ from Bio.SeqFeature import SeqFeature, FeatureLocation
 #   to do: clean up the expectation that the input is a -gff and change all 
 #   occurences to -file or something. won't change behavior but reflects types of files
 #
+#   Next job for featurebot is to process TSV best hit data and label genes
 #
 #
 # Simulate command-line arguments when running in an environment like Spyder.
@@ -30,86 +31,62 @@ from Bio.SeqFeature import SeqFeature, FeatureLocation
 
 # sys.argv = [
 #     "featurebot.py",
-#     "-gbkdir", "/Users/daniel/Desktop/ReturnoftheChrome/Results to map onto Geo/Heme_Geo_analysis/gbks_to_map",
-#     "-featuredir", "/Users/daniel/Desktop/ReturnoftheChrome/Results to map onto Geo/Heme_Geo_analysis/HemeResults_tomap",
+#     "-gbkdir", "/Users/daniel/Projects/wirehunter/all_3354_delta_wirehunter_results/1_cluster_annotated_bgk/",
+#     "-featuredir", "/Users/daniel/Projects/wirehunter/all_3354_delta_wirehunter_results/2_heme_tsvs/",
 #     "-multiheme",
-#     "--force"
+# #    "-proteinid",
+# #    "--force"
 # ]
 
-# # 
-#
+# # # /Users/daniel/Projects/finals/TypeI_results_3hits/
+# #
 ####################################################################
 
+
 def parse_arguments():
-    """
-    Parse command-line arguments for GenBank and GFF or TSV files,
-    including analysis type and automatic output filename generation.
-    """
     parser = argparse.ArgumentParser(
-        description="The Featurebot is a multipurpose tool to map annotations onto genomes.\n"
-        "It will update a GenBank file with output from SignalP, TMHMM beta barrel, or multiheme cytochrome analyses.\n"
-        "Can run in single mode (use -gff and -gbk for feature and genome file), or batch (specify -gbkdir and -feturedir).\n"
-        "\n"
-        "In batch mode, it will match feature files to genome files if acession number is filename prefix, like GCF_000816575.1_regionoutput.gff3.\n"
-        "Use -proteinid to use protein_id instead of locus_tag to match CDS features to annotations"
-    )
-    
-    parser.add_argument(
-        "-gff", "--gff_file",
-        required=False,
-        help="Path to the input file containing predicted features. Accepts gff3 output from SignalP 6.0, DTU DeepTHMM, and tsv from hemehunter"
-    )
-    
-    parser.add_argument(
-        "-gbk", "--genbank_file",
-        required=False,
-        help="Path to the input GenBank (.gb or .gbk or .gbff) file."
-    )
-    
-    parser.add_argument(
-        "-gbkdir", "--genbank_directory",
-        required=False,
-        help="Directory containing GenBank (.gbk, .gb, or .gbff) files for batch processing."
-    )
-    
-    parser.add_argument(
-        "-featuredir", "--feature_directory",
-        required=False,
-        help="Directory containing GFF/TSV feature files with matching prefixes. Default is to match locus tags, use -proteinid to use protein_id."
-    )
-    parser.add_argument(
-        "--force",
-        action="store_true",
-        help="Force overwrite of existing output files in batch mode."
-    )
-    
-    parser.add_argument(
-    "-proteinid",
-    action="store_true",
-    help="Use protein_id instead of locus_tag to match CDS features to annotations in -signal or -beta mode."
+        description="Featurebot: map four flavors of results from analyses on to genome annotations.\n\n"
+                    "Matches outputs from SignalP, beta barrel TMHMM, multiheme analyses, or cluster protein finders\n"
+                    "with their respective GenBank files, when both have filenames beginning with the same accession.\n\n"
+                    "Invoke batch mode using -gbkdir abnd -featuredir, single analyses with -gbk and -gff.\n"
+                    "Invoke different analyses with -signal, -beta, -multiheme, or -cluster.\n"
+                    "Default is to look for a locus tag for matching, switch to proteinID using -proteinid.\n"
+                    "Features are mapped as misc_feature with coordinates when available.\n"
     )
 
+    parser.add_argument("-gff", "--gff_file", required=False,
+                        help="Path to feature file (GFF3/TSV/cluster TSV).")
+    parser.add_argument("-gbk", "--genbank_file", required=False,
+                        help="Path to GenBank (.gb/.gbk/.gbff) file.")
+    parser.add_argument("-gbkdir", "--genbank_directory", required=False,
+                        help="Directory with GenBank files for batch mode.")
+    parser.add_argument("-featuredir", "--feature_directory", required=False,
+                        help="Directory with feature files for batch mode.")
+    parser.add_argument("--force", action="store_true",
+                        help="Force overwrite of existing output files.")
+    parser.add_argument("-proteinid", action="store_true",
+                        help="Use protein_id instead of locus_tag for matching.")
+
+
+    parser.add_argument("--suffix", type=str, default=None,
+                    help="Suffix to add to output filenames and output directory (e.g., 'signal', 'beta', 'cluster'). Overrides default suffix.")
+    
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("-signal", action="store_true", help="Parse signal peptide predictions from SignalP 6")
-    group.add_argument("-beta", action="store_true", help="Parse beta-barrel predictions from DeepTHMM")
-    group.add_argument("-multiheme", action="store_true", help="Parse multiheme cytochrome predictions")
-    
-    parser.add_argument(
-        "-o", "--output",
-        required=False,
-        default=None,
-        help="Output GenBank file with updated annotations (default: original name + _signal.gbk, _beta.gbk, or _multiheme.gbk)"
-    )
+    group.add_argument("-signal", action="store_true", help="Parse SignalP predictions.")
+    group.add_argument("-beta", action="store_true", help="Parse beta-barrel predictions.")
+    group.add_argument("-multiheme", action="store_true", help="Parse multiheme predictions.")
+    group.add_argument("-cluster", action="store_true", help="Parse cluster protein mapping data.")
 
+    
     args = parser.parse_args()
-    
-    # Only generate output name in single-file mode
-    if args.output is None and args.genbank_file and args.gff_file:
-        base, _ = os.path.splitext(os.path.basename(args.genbank_file))
-        suffix = "_signal.gbk" if args.signal else "_beta.gbk" if args.beta else "_multiheme.gbk"
-        args.output = base + suffix
-    
+
+    # Auto-generate output file name in single mode
+    # base, _ = os.path.splitext(os.path.basename(args.genbank_file))
+    # suffix = "_signal.gbk" if args.signal else "_beta.gbk" if args.beta else "_multiheme.gbk" if args.multiheme else "_cluster.gbk"
+    # output_file = base + suffix
+
     return args
+
 
 ####################################################################
 
@@ -124,10 +101,10 @@ def check_input_files(gff_path, gbk_path, args):
         if not gff_path.lower().endswith(".tsv"):
             sys.exit(f"❌ Error: expected a .tsv file for multiheme analysis, got: {gff_path}")
     else:
-        if not os.path.isfile(gbk_path) or not gbk_path.lower().endswith((".gb", ".gbk", ".gbff")):
-            sys.exit(f"❌ Error: expected a .gff or .gff3 file for signal or beta analysis, got: {gff_path}")
+        if not os.path.isfile(gbk_path) or not gbk_path.lower().endswith((".gff", ".gff3")):
+            sys.exit(f"❌ DEBUG Error: expected a .gff or .gff3 file for signal or beta analysis, got: {gff_path}")
 
-    if not os.path.isfile(gbk_path) or not gbk_path.lower().endswith((".gb", ".gbk")):
+    if not os.path.isfile(gbk_path) or not gbk_path.lower().endswith((".gb", ".gbk", "gbff")):
         sys.exit(f"❌ Error: {gbk_path} is not a valid .gb or .gbk file.")
 
 # Signal P parsing ###################################################################
@@ -306,9 +283,34 @@ def parse_multiheme_tsv(gff_file):
 
     return features
 
+# cluster output parsing ###################################################################
+
+def parse_cluster_tsv(cluster_file):
+    cluster_annotations = {}
+    with open(cluster_file, newline='') as fh:
+        reader = csv.reader(fh, delimiter='\t')
+#         header = next(reader, None)
+        for row in reader:
+            if len(row) < 3:
+                continue
+            locus_tag, protein_name, organism = row[0].strip(), row[1].strip(), row[2].strip()
+
+            # Skip entries where protein name is "No hit"
+            if protein_name.lower() == "no hit":
+                continue
+
+            # Skip incomplete rows
+            if not locus_tag or not protein_name or not organism:
+                continue
+
+            # Save protein_name and organism as a combined string
+            cluster_annotations[locus_tag] = f"{protein_name} {organism}"
+
+    return cluster_annotations
+
 ####################################################################
 
-#   Annotation loops
+#   Annotation loops - add features to GenBank, as misc_feature and/or /product (clusters)
 
 ####################################################################
 
@@ -462,9 +464,8 @@ def add_beta_barrels_to_genbank(gbk_file, output_file, beta_features, args):
             beta_sheets = [r for r in region_list if r["type"].strip().lower() == "beta sheet"]
             
             if len(beta_sheets) < 4:
-                continue  # skip if fewer than 8 beta sheets
+                continue  # skip if fewer than n beta sheets
 
-            # print(f"✅ Annotating {matching_tag} with {len(beta_sheets)} beta strands")
             # Get residue start/end from first and last beta sheet
             aa_start = beta_sheets[0]["start"]
             aa_end = beta_sheets[-1]["end"]
@@ -546,122 +547,189 @@ def add_multihemes_to_genbank(gbk_file, output_file, multihemes):
     SeqIO.write(records, output_file, "genbank")
     print(f"✅ Added {count} multiheme cytochrome annotations to GenBank file: {output_file}")
 
-##################################################################   
+################################################################## 
+
+def add_clusters_to_genbank(gbk_file, output_file, cluster_data):
+    records = list(SeqIO.parse(gbk_file, "genbank"))
+    count = 0
+    for record in records:
+        for feature in record.features:
+            if feature.type != "CDS":
+                continue
+            locus_tags = feature.qualifiers.get("locus_tag", []) + feature.qualifiers.get("old_locus_tag", [])
+            matching_tag = next((tag for tag in locus_tags if tag in cluster_data), None)
+            if not matching_tag:
+                continue
+            combined_note = cluster_data[matching_tag]
+
+            #
+            #
+            #
+            # Replace /product with the new label (can comment this out if not needed)
+            #
+            feature.qualifiers["product"] = [combined_note]
+            # 
+
+
+            # Add as a misc_feature as well
+            new_feature = SeqFeature(
+                location=feature.location,
+                type="misc_feature",
+                qualifiers={
+                    "note": [combined_note],
+                    "locus_tag": [matching_tag]
+                }
+            )
+            cds_index = record.features.index(feature)
+            record.features.insert(cds_index + 1, new_feature)
+            count += 1
+    with open(output_file, "w") as out_handle:
+        SeqIO.write(records, out_handle, "genbank")
+        
+    print(f"Added {count} cluster annotations (and updated /product) to GenBank file: {output_file}")
+  
+##################################################################
 
 #   Main loop
 
 ####################################################################
-# 
+
 # If two folders are provided with features and gbk files, will do batch mode, otherwise will attempt single mode
+
 
 def main():
     args = parse_arguments()
 
+    # Determine suffix from argument or mode
+    if args.suffix:
+        suffix = f"_{args.suffix}"
+    elif args.signal:
+        suffix = "_signal"
+    elif args.beta:
+        suffix = "_beta"
+    elif args.multiheme:
+        suffix = "_multiheme"
+    elif args.cluster:
+        suffix = "_cluster"
+    else:
+        suffix = "_annotated"
+
     ########## Batch mode: if both folders provided
-    
     if args.genbank_directory and args.feature_directory:
         gbk_dir = Path(args.genbank_directory)
         feature_dir = Path(args.feature_directory)
     
         print(f"📁 Batch mode: scanning {feature_dir} for feature files...")
     
-        feature_files = list(feature_dir.glob("*.gff3" if args.signal or args.beta else "*.tsv"))
-    
+        # Match GFF or TSV depending on mode
+        feature_files = list(
+            feature_dir.glob("*.gff3" if args.signal or args.beta else "*.tsv")
+        )
         if not feature_files:
             sys.exit("❌ No feature files found in feature directory.")
     
+        # Create output directory next to GenBank directory
+        outdir = gbk_dir.parent / f"{gbk_dir.name}{suffix}"
+        outdir.mkdir(parents=True, exist_ok=True)
+    
         for feature_file in feature_files:
-            print(f"📄 Checking feature file: {feature_file.name}")
+            print(f"\n Checking feature file: {feature_file.name}")
     
-            # Use regex to extract the accession prefix
-            match = re.match(r"^(GCF_\d+\.\d+)", feature_file.name)
+            # Extract accession (e.g., GCA_000016745.1)
+            match = re.match(r"^(GCF|GCA)_\d+\.\d+", feature_file.name)
             if not match:
-                print(f"⚠️ Cannot determine accession from: {feature_file.name}")
+                print(f"⚠️ Cannot extract accession from: {feature_file.name}")
                 continue
+            accession = match.group(0)
+            print(f" Using accession: {accession}")
     
-            prefix = match.group(1)
-            print(f"Using prefix: {prefix}")
+            # Find GenBank file starting with accession
+            gbk_matches = sorted(gbk_dir.glob(f"{accession}*.gb*"))
+            if not gbk_matches:
+                print(f"⚠️ No GenBank file found starting with {accession}")
+                print(" GenBank files available:")
+                for f in gbk_dir.glob("*.gb*"):
+                    print(f"  - {f.name}")
+                continue
+            matching_gbk = gbk_matches[0]
+            print(f"✅ Matched GenBank file: {matching_gbk.name}")
     
-          # Match either exact or suffix-extended GenBank file, like GCF_99999999.gbk and GCF_99999999_signal.gbk
-            matching_gbk = next(
-                iter(sorted(gbk_dir.glob(f"{prefix}.gb*")) + sorted(gbk_dir.glob(f"{prefix}_*.gb*"))),
-                None
-            )
+            # Build output path: accession + suffix
+            output_path = outdir / f"{accession}{suffix}.gbk"
     
-            # Build output filename
-            suffix = "_signal.gbk" if args.signal else "_beta.gbk" if args.beta else "_multiheme.gbk"
-            output_path = gbk_dir / f"{prefix}{suffix}"
-    
-            # Skip if exists and not forcing overwrite
             if output_path.exists() and not args.force:
-                print(f"⏩ Skipping {prefix}: output file {output_path.name} already exists (use --force to overwrite)")
+                print(f"⏩ Skipping {accession}: output file {output_path.name} already exists (use --force to overwrite)")
                 continue
     
-            # Dispatch annotation based on mode
+            # Dispatch by mode
             if args.signal:
                 annotations = parse_signalp_gff(feature_file)
                 signal_peptides = extract_signal_peptides(annotations)
                 lipid_sites = extract_lipid_cysteines(annotations)
                 tat_motifs = extract_tat_motifs(annotations)
-                add_signal_peptides_to_genbank(matching_gbk, output_path, signal_peptides, lipid_sites, tat_motifs, args)
-    
+                add_signal_peptides_to_genbank(
+                    matching_gbk, output_path, signal_peptides, lipid_sites, tat_motifs, args
+                )
             elif args.beta:
                 beta_barrels = parse_beta_gff(feature_file)
                 add_beta_barrels_to_genbank(matching_gbk, output_path, beta_barrels, args)
-    
             elif args.multiheme:
                 multihemes = parse_multiheme_tsv(feature_file)
                 add_multihemes_to_genbank(matching_gbk, output_path, multihemes)
+            elif args.cluster:
+                cluster_data = parse_cluster_tsv(feature_file)
+                add_clusters_to_genbank(matching_gbk, output_path, cluster_data)
     
-        print("✅ Batch annotation complete.")
-        return  # prevent single-file mode from running
+        print(f"\n Batch annotation complete. Output files written to: {outdir}")
+        return
+    ########## Single-file mode fallback
 
-    ########## Single-file fallback mode
-    
-    check_input_files(args.gff_file, args.genbank_file, args)
+    # check_input_files(args.gff_file, args.genbank_file, args)
 
-    print(f"✅ Input file: {args.gff_file}")
-    print(f"✅ GenBank input file: {args.genbank_file}")
-    print(f"➡️ Output will be written to: {args.output}")
+    gbk_path = Path(args.genbank_file)
+    base = gbk_path.stem
+    parent_dir = gbk_path.parent
 
-    # Dispatch based on analysis type
+    outdir = parent_dir / f"{parent_dir.name}{suffix}"
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    output_file = outdir / f"{base}{suffix}.gbk"
+
+    print(f"Input file: {args.gff_file}")
+    print(f"GenBank input file: {args.genbank_file}")
+    print(f"➡️ Output will be written to: {output_file}")
+
     if args.signal:
         print("🔍 Parsing SignalP GFF...")
         annotations = parse_signalp_gff(args.gff_file)
-
         signal_peptides = extract_signal_peptides(annotations)
         lipid_sites = extract_lipid_cysteines(annotations)
         tat_motifs = extract_tat_motifs(annotations)
-
         add_signal_peptides_to_genbank(
-            args.genbank_file,
-            args.output,
-            signal_peptides,
-            lipid_sites,
-            tat_motifs
+            args.genbank_file, output_file, signal_peptides, lipid_sites, tat_motifs, args
         )
-
     elif args.beta:
         print("🔍 Parsing beta-barrel GFF...")
         beta_barrels = parse_beta_gff(args.gff_file)
-
         add_beta_barrels_to_genbank(
-            args.genbank_file,
-            args.output,
-            beta_barrels
+            args.genbank_file, output_file, beta_barrels, args
         )
-
     elif args.multiheme:
         print("🔍 Parsing multiheme cytochrome file...")
         multihemes = parse_multiheme_tsv(args.gff_file)
-
         add_multihemes_to_genbank(
-            args.genbank_file,
-            args.output,
-            multihemes
+            args.genbank_file, output_file, multihemes
+        )
+    elif args.cluster:
+        print("🔍 Parsing cluster TSV...")
+        cluster_data = parse_cluster_tsv(args.gff_file)
+        add_clusters_to_genbank(
+            args.genbank_file, output_file, cluster_data
         )
 
-    print(f"✅ All annotations added to GenBank file: {args.output}")
-    
+    print(f"All annotations added to GenBank file: {output_file}")
+
+##################################################################
 if __name__ == "__main__":
     main()
+    

@@ -1,22 +1,28 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Sun May 18 21:58:34 2025
+ this looks at a folder *full of folders* named by their Acession Number, like GCF_0238273.1
 
-@author: daniel
+   inside each folder are files with extensions.
+   
+   This will just remove the filename and
+
+   replace it with the folder's name, plus the original acession. So if the files are all
+
+  genome.gbk and genome.faa, they become GCF_0238273.1.gbk and GCF_0238273.1.faa
+  
+  If you just have a gbff file, make sure it is in a folder
+
 """
 
 import os
 
 
-# this looks at a folder full of folders named by their Acession Number, like GCF_0238273.1
-#   inside each folder are files with extensions, this will just remove the filename and
-#   replace it with the folder's name, plus the original acession. So if the files are all
-#   genome.gbk and genome.faa, they become GCF_0238273.1.gbk and GCF_0238273.1.faa
+
 
 # There is no argparsing, just run from Spyder
 
-parent_dir = "/Users/daniel/Desktop/ReturnoftheChrome/DesulfuromonadalesRefSeq"  
+parent_dir = "/Users/daniel/Projects/wirehunter/all_3354_delta_wirehunter_results/4_betasearch/"  
 
 # replace with the path to your folder containing the folders
 

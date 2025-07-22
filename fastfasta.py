@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 
-#
+"""
+
 #   fastfasta - extract amino acid sequences from a genbank file
+
+does what it says - feed it a gbk file, spit out a faa file
+
+"""
 
 import argparse
 import os
